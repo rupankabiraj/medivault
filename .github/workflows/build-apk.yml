@@ -21,28 +21,25 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 platforms;android-36 build-tools;35.0.0'
 
       - name: Accept Android Licenses
         run: yes | sdkmanager --licenses || true
-
-      - name: Install Android Build-Tools and Platform
-        run: |
-          sdkmanager "platforms;android-35" "platforms;android-36" "build-tools;35.0.0" || true
 
       - name: Prepare Secrets and Keystore
         run: |
           if [ -f "debug.keystore.base64" ]; then
             base64 -d debug.keystore.base64 > debug.keystore
-          fi
-          if [ -f ".env.example" ] && [ ! -f ".env" ]; then
-            cp .env.example .env
+          else
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
           touch .env
-
-      - name: Validate Gradle Wrapper
-        uses: gradle/actions/wrapper-validation@v3
+          if [ -f ".env.example" ]; then
+            cat .env.example >> .env
+          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -51,8 +48,7 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          chmod +x ./gradlew 2>/dev/null || true
-          gradle :app:assembleDebug --stacktrace --no-daemon
+          gradle :app:assembleDebug -Dorg.gradle.configuration-cache=false --no-daemon --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
