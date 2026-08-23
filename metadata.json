@@ -1,0 +1,6 @@
+{
+  "name": "MediVault",
+  "description": "Manage medical bills, lab reports, prescriptions, and health expenses with detailed analytics and dose tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
