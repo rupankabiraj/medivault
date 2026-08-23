@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Medication
@@ -41,6 +42,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -65,6 +67,7 @@ import com.example.data.model.MedicalRecordType
 import com.example.data.model.MedicalReport
 import com.example.data.model.MedicalTimelineItem
 import com.example.data.model.Prescription
+import com.example.data.util.AttachmentUtils
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.PatientSelectorBar
 import com.example.ui.components.SearchAndFilterBar
@@ -439,7 +442,7 @@ fun TimelineEventCard(
             if (!item.attachmentUri.isNullOrBlank()) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onOpenAttachment() }
@@ -453,7 +456,7 @@ fun TimelineEventCard(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         // Thumbnail
-                        val imageFile = File(item.attachmentUri)
+                        val imageFile = AttachmentUtils.resolveFile(context, item.attachmentUri)
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
@@ -461,7 +464,7 @@ fun TimelineEventCard(
                                 .background(MaterialTheme.colorScheme.surface),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (imageFile.exists()) {
+                            if (imageFile != null && imageFile.exists()) {
                                 AsyncImage(
                                     model = ImageRequest.Builder(context)
                                         .data(imageFile)
@@ -501,24 +504,47 @@ fun TimelineEventCard(
                                 )
                             }
                             Text(
-                                text = "Tap to view full scanned document",
+                                text = "Tap to view, download or share",
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                                 color = EmeraldTertiary
                             )
                         }
 
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Visibility,
-                                contentDescription = "View",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            IconButton(
+                                onClick = {
+                                    AttachmentUtils.downloadAttachmentToDevice(
+                                        context,
+                                        item.attachmentUri,
+                                        item.attachmentName ?: item.title
+                                    )
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Download attachment",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
                                 modifier = Modifier
-                                    .padding(6.dp)
-                                    .size(16.dp)
-                            )
+                                    .size(32.dp)
+                                    .clickable { onOpenAttachment() }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Visibility,
+                                        contentDescription = "View",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }

@@ -1514,17 +1514,40 @@ fun AddEditMemberDialog(
     ) -> Unit
 ) {
     val context = LocalContext.current
-    var name by remember { mutableStateOf(member?.name ?: "") }
-    var relationship by remember { mutableStateOf(member?.relationship ?: "Self") }
-    var ageStr by remember { mutableStateOf(if (member != null) member.age.toString() else "30") }
-    var bloodGroup by remember { mutableStateOf(member?.bloodGroup ?: "O+") }
-    var allergies by remember { mutableStateOf(member?.allergies ?: "") }
-    var emergencyContact by remember { mutableStateOf(member?.emergencyContact ?: "") }
-    var selectedColor by remember { mutableStateOf(member?.avatarColorHex ?: "#00897B") }
+    var name by remember(member) { mutableStateOf(member?.name ?: "") }
+    var relationship by remember(member) { mutableStateOf(member?.relationship ?: "Self") }
+    var ageStr by remember(member) { mutableStateOf(if (member != null) member.age.toString() else "30") }
+    var bloodGroup by remember(member) { mutableStateOf(member?.bloodGroup ?: "O+") }
+    var allergies by remember(member) { mutableStateOf(member?.allergies ?: "") }
+    var emergencyContact by remember(member) { mutableStateOf(member?.emergencyContact ?: "") }
+    var selectedColor by remember(member) { mutableStateOf(member?.avatarColorHex ?: "#00897B") }
 
     val relationships = listOf("Self", "Spouse", "Son", "Daughter", "Father", "Mother", "Grandfather", "Grandmother", "Sibling", "Other")
     val bloodGroups = listOf("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-")
-    val colorPalettes = listOf("#00897B", "#00ACC1", "#43A047", "#7CB342", "#FB8C00", "#E53935", "#8E24AA", "#3949AB")
+    val colorPalettes = listOf(
+        "#00897B", // Deep Teal
+        "#00ACC1", // Vibrant Cyan
+        "#1E88E5", // Ocean Blue
+        "#3949AB", // Indigo
+        "#8E24AA", // Purple
+        "#D81B60", // Rose Pink
+        "#E53935", // Crimson Red
+        "#FB8C00", // Coral Orange
+        "#F57F17", // Amber Gold
+        "#43A047", // Emerald Green
+        "#7CB342", // Light Olive
+        "#558B2F", // Forest Green
+        "#6D4C41", // Bronze Brown
+        "#455A64", // Slate Blue
+        "#5E35B1", // Deep Violet
+        "#004D40"  // Pine Dark Teal
+    )
+
+    val currentThemeColor = try {
+        Color(android.graphics.Color.parseColor(selectedColor))
+    } catch (e: Exception) {
+        TealPrimary
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -1552,6 +1575,48 @@ fun AddEditMemberDialog(
                     )
                     IconButton(onClick = onDismiss) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                // Live Member Theme & Avatar Preview Card
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = currentThemeColor.copy(alpha = 0.12f),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, currentThemeColor.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(currentThemeColor),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (name.isNotBlank()) name.take(1).uppercase() else "?",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (name.isNotBlank()) name else "Member Name Preview",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "$relationship • $bloodGroup • Theme: $selectedColor",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = currentThemeColor
+                            )
+                        }
                     }
                 }
 
@@ -1611,7 +1676,7 @@ fun AddEditMemberDialog(
                 OutlinedTextField(
                     value = allergies,
                     onValueChange = { allergies = it },
-                    label = { Text("Allergies / Conditions") },
+                    label = { Text("Allergies / Medical Conditions") },
                     placeholder = { Text("e.g. Penicillin, Peanuts, Asthma") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -1627,29 +1692,46 @@ fun AddEditMemberDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Avatar Color
-                Text(text = "Profile Avatar Color:", style = MaterialTheme.typography.labelMedium)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    for (cHex in colorPalettes) {
-                        val c = try { Color(android.graphics.Color.parseColor(cHex)) } catch (e: Exception) { Color.Gray }
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(c)
-                                .clickable { selectedColor = cHex },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (selectedColor == cHex) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                // Avatar Theme Color Picker with 16 rich color chips
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Member Theme & Avatar Color:",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        for (cHex in colorPalettes) {
+                            val c = try {
+                                Color(android.graphics.Color.parseColor(cHex))
+                            } catch (e: Exception) {
+                                Color.Gray
+                            }
+                            val isSelected = selectedColor.equals(cHex, ignoreCase = true)
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(c)
+                                    .border(
+                                        width = if (isSelected) 3.dp else 1.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                                        shape = CircleShape
+                                    )
+                                    .clickable { selectedColor = cHex }
+                                    .testTag("color_chip_$cHex"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected Color",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
                     }

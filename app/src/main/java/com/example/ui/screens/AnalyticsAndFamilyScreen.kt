@@ -308,6 +308,7 @@ fun AnalyticsAndFamilyScreen(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 ),
+                border = androidx.compose.foundation.BorderStroke(1.dp, avatarColor.copy(alpha = 0.35f)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Row(

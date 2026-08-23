@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocalHospital
@@ -70,6 +71,7 @@ import com.example.data.model.MedicalBill
 import com.example.data.model.MedicalReport
 import com.example.data.model.Medication
 import com.example.data.model.Prescription
+import com.example.data.util.AttachmentUtils
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.CyanSecondary
 import com.example.ui.theme.EmeraldTertiary
@@ -748,11 +750,11 @@ fun AttachedDocumentCard(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val file = File(uri)
+    val resolvedFile = AttachmentUtils.resolveFile(context, uri)
 
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         modifier = modifier
             .fillMaxWidth()
             .clickable { onViewClick() }
@@ -767,18 +769,18 @@ fun AttachedDocumentCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(50.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.surface),
                 contentAlignment = Alignment.Center
             ) {
-                if (file.exists()) {
+                if (resolvedFile != null && resolvedFile.exists()) {
                     AsyncImage(
                         model = ImageRequest.Builder(context)
-                            .data(file)
+                            .data(resolvedFile)
                             .crossfade(true)
                             .build(),
-                        contentDescription = "Attachment preview",
+                        contentDescription = "Attachment thumbnail",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
@@ -787,7 +789,7 @@ fun AttachedDocumentCard(
                         imageVector = Icons.Default.Image,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(26.dp)
                     )
                 }
             }
@@ -799,24 +801,58 @@ fun AttachedDocumentCard(
                     maxLines = 1
                 )
                 Text(
-                    text = "Tap to view full scanned document",
+                    text = "Tap to view, download or share",
                     style = MaterialTheme.typography.labelSmall,
-                    color = EmeraldTertiary
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
 
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Visibility,
-                    contentDescription = "View",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            // Quick Actions: Download, Share, View
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                IconButton(
+                    onClick = {
+                        AttachmentUtils.downloadAttachmentToDevice(context, uri, name)
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "Download attachment",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        AttachmentUtils.shareAttachment(context, uri, name)
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Share attachment",
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
                     modifier = Modifier
-                        .padding(6.dp)
-                        .size(18.dp)
-                )
+                        .size(36.dp)
+                        .clickable { onViewClick() }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Visibility,
+                            contentDescription = "View Full",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -871,7 +907,7 @@ fun AttachmentFullScreenViewerDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val file = File(uri)
+    val resolvedFile = AttachmentUtils.resolveFile(context, uri)
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -879,52 +915,89 @@ fun AttachmentFullScreenViewerDialog(
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
-            color = Color.Black.copy(alpha = 0.95f)
+            color = Color.Black.copy(alpha = 0.96f)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
+                // Header with Title, Download, Share, and Close
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 24.dp),
+                        .padding(top = 28.dp, bottom = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        ),
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = Color.White
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            ),
+                            maxLines = 1
                         )
+                        Text(
+                            text = "Scanned Medical Record",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Color.LightGray
+                            )
+                        )
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                AttachmentUtils.downloadAttachmentToDevice(context, uri, title)
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Download Document",
+                                tint = Color.White
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                AttachmentUtils.shareAttachment(context, uri, title)
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Share Document",
+                                tint = Color.White
+                            )
+                        }
+
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color.White
+                            )
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
+                // Image Viewer Container
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color.DarkGray),
+                        .background(Color(0xFF1E1E1E)),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (file.exists()) {
+                    if (resolvedFile != null && resolvedFile.exists()) {
                         AsyncImage(
                             model = ImageRequest.Builder(context)
-                                .data(file)
+                                .data(resolvedFile)
                                 .crossfade(true)
                                 .build(),
                             contentDescription = "Full Scanned Document",
@@ -932,36 +1005,71 @@ fun AttachmentFullScreenViewerDialog(
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Image,
-                                contentDescription = null,
-                                tint = Color.LightGray,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Text(
-                                text = "Attached image file not found locally",
-                                color = Color.LightGray,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
+                        // Also attempt loading via Uri string directly
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(uri)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Full Scanned Document",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // Bottom Action Bar with Download, Share, and Close
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
+                        onClick = {
+                            AttachmentUtils.downloadAttachmentToDevice(context, uri, title)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = TealPrimary,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Download")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            AttachmentUtils.shareAttachment(context, uri, title)
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Share")
+                    }
+
+                    TextButton(
                         onClick = onDismiss,
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Close Viewer")
+                        Text("Close", color = Color.LightGray)
                     }
                 }
             }

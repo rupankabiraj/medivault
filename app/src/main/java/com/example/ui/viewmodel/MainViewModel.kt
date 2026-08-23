@@ -718,6 +718,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         colorHex: String
     ) {
         viewModelScope.launch {
+            val isPrimary = editingMember.value?.isPrimary ?: (id == 1L || relationship == "Self")
             val member = FamilyMember(
                 id = id,
                 name = name.trim(),
@@ -726,7 +727,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 bloodGroup = bloodGroup,
                 allergies = allergies.trim(),
                 emergencyContact = emergencyContact.trim(),
-                avatarColorHex = colorHex
+                avatarColorHex = colorHex,
+                isPrimary = isPrimary
             )
             if (id == 0L) {
                 repository.insertMember(member)
