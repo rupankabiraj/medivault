@@ -30,6 +30,12 @@ interface FamilyMemberDao {
 
     @Delete
     suspend fun deleteMember(member: FamilyMember)
+
+    @Query("DELETE FROM family_members WHERE isPrimary = 0")
+    suspend fun deleteNonPrimaryMembers()
+
+    @Query("DELETE FROM family_members")
+    suspend fun deleteAllMembers()
 }
 
 @Dao
@@ -54,6 +60,9 @@ interface MedicalBillDao {
 
     @Query("DELETE FROM medical_bills WHERE id = :id")
     suspend fun deleteBillById(id: Long)
+
+    @Query("DELETE FROM medical_bills")
+    suspend fun deleteAllBills()
 }
 
 @Dao
@@ -78,6 +87,9 @@ interface MedicalReportDao {
 
     @Query("DELETE FROM medical_reports WHERE id = :id")
     suspend fun deleteReportById(id: Long)
+
+    @Query("DELETE FROM medical_reports")
+    suspend fun deleteAllReports()
 }
 
 @Dao
@@ -102,6 +114,9 @@ interface PrescriptionDao {
 
     @Query("DELETE FROM prescriptions WHERE id = :id")
     suspend fun deletePrescriptionById(id: Long)
+
+    @Query("DELETE FROM prescriptions")
+    suspend fun deleteAllPrescriptions()
 }
 
 @Dao
@@ -132,6 +147,9 @@ interface MedicationDao {
 
     @Query("DELETE FROM medications WHERE prescriptionId = :prescriptionId")
     suspend fun deleteMedicationsByPrescription(prescriptionId: Long)
+
+    @Query("DELETE FROM medications")
+    suspend fun deleteAllMedications()
 }
 
 @Dao
@@ -147,4 +165,7 @@ interface DoseLogDao {
 
     @Query("DELETE FROM dose_logs WHERE medicationId = :medicationId AND dateDayString = :dayString AND slot = :slot")
     suspend fun deleteDoseLog(medicationId: Long, dayString: String, slot: String)
+
+    @Query("DELETE FROM dose_logs")
+    suspend fun deleteAllDoseLogs()
 }

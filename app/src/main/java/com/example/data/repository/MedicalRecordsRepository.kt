@@ -97,6 +97,22 @@ class MedicalRecordsRepository(private val db: AppDatabase) {
     suspend fun updatePrescription(prescription: Prescription) =
         db.prescriptionDao().updatePrescription(prescription)
 
+    suspend fun savePrescriptionWithMedications(
+        prescription: Prescription,
+        medications: List<Medication>
+    ): Long {
+        val rxId = if (prescription.id == 0L) {
+            db.prescriptionDao().insertPrescription(prescription)
+        } else {
+            db.prescriptionDao().updatePrescription(prescription)
+            db.medicationDao().deleteMedicationsByPrescription(prescription.id)
+            prescription.id
+        }
+        val medsWithId = medications.map { it.copy(prescriptionId = rxId, memberId = prescription.memberId) }
+        db.medicationDao().insertMedications(medsWithId)
+        return rxId
+    }
+
     suspend fun deletePrescription(prescription: Prescription) {
         db.medicationDao().deleteMedicationsByPrescription(prescription.id)
         db.prescriptionDao().deletePrescription(prescription)
@@ -128,9 +144,34 @@ class MedicalRecordsRepository(private val db: AppDatabase) {
         db.medicationDao().updateMedication(updated)
     }
 
+    suspend fun clearAllData() {
+        db.doseLogDao().deleteAllDoseLogs()
+        db.medicationDao().deleteAllMedications()
+        db.prescriptionDao().deleteAllPrescriptions()
+        db.medicalReportDao().deleteAllReports()
+        db.medicalBillDao().deleteAllBills()
+        db.familyMemberDao().deleteNonPrimaryMembers()
+    }
+
     // Dose Logs
     fun getDoseLogsForDay(dayString: String): Flow<List<DoseLog>> =
         db.doseLogDao().getDoseLogsForDay(dayString)
+
+    suspend fun logDose(
+        medicationId: Long,
+        memberId: Long,
+        dateDayString: String,
+        slot: String,
+        isTaken: Boolean
+    ) {
+        logDose(
+            medicationId = medicationId,
+            memberId = memberId,
+            dayString = dateDayString,
+            slot = slot,
+            status = if (isTaken) DoseStatus.TAKEN else DoseStatus.SKIPPED
+        )
+    }
 
     suspend fun logDose(
         medicationId: Long,

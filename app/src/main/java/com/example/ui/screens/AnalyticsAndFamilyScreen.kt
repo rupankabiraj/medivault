@@ -53,7 +53,7 @@ import com.example.ui.theme.EmeraldTertiary
 import com.example.ui.theme.StatusSuccess
 import com.example.ui.theme.TealContainer
 import com.example.ui.theme.TealPrimary
-import com.example.ui.viewmodel.DashboardSummary
+import com.example.data.model.DashboardSummary
 import java.util.Locale
 
 @Composable

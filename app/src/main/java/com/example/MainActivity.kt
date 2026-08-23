@@ -20,14 +20,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.HealthAndSafety
-import androidx.compose.material.icons.filled.LocalHospital
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Medication
 import androidx.compose.material.icons.outlined.Receipt
 import androidx.compose.material.icons.outlined.Science
@@ -57,18 +58,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.model.DashboardSummary
+import com.example.data.model.MedicalRecordType
+import com.example.data.model.ScheduledDoseItem
 import com.example.ui.dialogs.AddEditBillSheet
 import com.example.ui.dialogs.AddEditMemberDialog
 import com.example.ui.dialogs.AddEditPrescriptionSheet
 import com.example.ui.dialogs.AddEditReportSheet
+import com.example.ui.dialogs.AttachmentFullScreenViewerDialog
 import com.example.ui.dialogs.BillDetailDialog
 import com.example.ui.dialogs.HealthSummaryExportDialog
 import com.example.ui.dialogs.PrescriptionDetailDialog
@@ -79,6 +82,7 @@ import com.example.ui.screens.BillsScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.PrescriptionsScreen
 import com.example.ui.screens.ReportsScreen
+import com.example.ui.screens.TimelineScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.StatusDanger
 import com.example.ui.theme.TealContainer
@@ -109,6 +113,15 @@ fun MediVaultApp(
     val billStatusFilter by viewModel.billStatusFilter.collectAsStateWithLifecycle()
     val reportCategoryFilter by viewModel.reportCategoryFilter.collectAsStateWithLifecycle()
     val reportStatusFilter by viewModel.reportStatusFilter.collectAsStateWithLifecycle()
+
+    // Timeline state
+    val timelineFilterType by viewModel.timelineFilterType.collectAsStateWithLifecycle()
+    val timelineOnlyAttachments by viewModel.timelineOnlyAttachments.collectAsStateWithLifecycle()
+    val filteredTimeline by viewModel.filteredTimeline.collectAsStateWithLifecycle()
+
+    // Full screen attachment viewer
+    val viewingAttachmentUri by viewModel.viewingAttachmentImageUri.collectAsStateWithLifecycle()
+    val viewingAttachmentTitle by viewModel.viewingAttachmentTitle.collectAsStateWithLifecycle()
 
     val members by viewModel.allMembers.collectAsStateWithLifecycle()
     val allBills by viewModel.allBills.collectAsStateWithLifecycle()
@@ -179,6 +192,16 @@ fun MediVaultApp(
                 },
                 actions = {
                     IconButton(
+                        onClick = { viewModel.setTab(5) },
+                        modifier = Modifier.testTag("topbar_insights_button")
+                    ) {
+                        Icon(
+                            imageVector = if (selectedTab == 5) Icons.Default.BarChart else Icons.Outlined.Analytics,
+                            contentDescription = "Insights & Analytics",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(
                         onClick = { viewModel.showExportSummary.value = true },
                         modifier = Modifier.testTag("topbar_export_button")
                     ) {
@@ -218,10 +241,28 @@ fun MediVaultApp(
                     modifier = Modifier.testTag("nav_tab_dashboard")
                 )
 
-                // Tab 1: Bills
+                // Tab 1: Date-wise Timeline & Attachments
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { viewModel.setTab(1) },
+                    icon = {
+                        Icon(
+                            imageVector = if (selectedTab == 1) Icons.Default.History else Icons.Outlined.History,
+                            contentDescription = "Timeline"
+                        )
+                    },
+                    label = { Text("Timeline", fontSize = 11.sp, fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                        indicatorColor = TealContainer
+                    ),
+                    modifier = Modifier.testTag("nav_tab_timeline")
+                )
+
+                // Tab 2: Bills
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { viewModel.setTab(2) },
                     icon = {
                         BadgedBox(
                             badge = {
@@ -233,12 +274,12 @@ fun MediVaultApp(
                             }
                         ) {
                             Icon(
-                                imageVector = if (selectedTab == 1) Icons.Default.ReceiptLong else Icons.Outlined.Receipt,
+                                imageVector = if (selectedTab == 2) Icons.Default.ReceiptLong else Icons.Outlined.Receipt,
                                 contentDescription = "Bills"
                             )
                         }
                     },
-                    label = { Text("Bills", fontSize = 11.sp, fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal) },
+                    label = { Text("Bills", fontSize = 11.sp, fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Normal) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = MaterialTheme.colorScheme.primary,
                         indicatorColor = TealContainer
@@ -246,10 +287,10 @@ fun MediVaultApp(
                     modifier = Modifier.testTag("nav_tab_bills")
                 )
 
-                // Tab 2: Reports
+                // Tab 3: Reports
                 NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { viewModel.setTab(2) },
+                    selected = selectedTab == 3,
+                    onClick = { viewModel.setTab(3) },
                     icon = {
                         BadgedBox(
                             badge = {
@@ -261,12 +302,12 @@ fun MediVaultApp(
                             }
                         ) {
                             Icon(
-                                imageVector = if (selectedTab == 2) Icons.Default.Science else Icons.Outlined.Science,
+                                imageVector = if (selectedTab == 3) Icons.Default.Science else Icons.Outlined.Science,
                                 contentDescription = "Reports"
                             )
                         }
                     },
-                    label = { Text("Reports", fontSize = 11.sp, fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Normal) },
+                    label = { Text("Reports", fontSize = 11.sp, fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Normal) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = MaterialTheme.colorScheme.primary,
                         indicatorColor = TealContainer
@@ -274,10 +315,10 @@ fun MediVaultApp(
                     modifier = Modifier.testTag("nav_tab_reports")
                 )
 
-                // Tab 3: Prescriptions & Meds
+                // Tab 4: Prescriptions & Meds
                 NavigationBarItem(
-                    selected = selectedTab == 3,
-                    onClick = { viewModel.setTab(3) },
+                    selected = selectedTab == 4,
+                    onClick = { viewModel.setTab(4) },
                     icon = {
                         BadgedBox(
                             badge = {
@@ -289,35 +330,17 @@ fun MediVaultApp(
                             }
                         ) {
                             Icon(
-                                imageVector = if (selectedTab == 3) Icons.Default.Medication else Icons.Outlined.Medication,
+                                imageVector = if (selectedTab == 4) Icons.Default.Medication else Icons.Outlined.Medication,
                                 contentDescription = "Prescriptions"
                             )
                         }
                     },
-                    label = { Text("Rx & Meds", fontSize = 11.sp, fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Normal) },
+                    label = { Text("Rx & Meds", fontSize = 11.sp, fontWeight = if (selectedTab == 4) FontWeight.Bold else FontWeight.Normal) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = MaterialTheme.colorScheme.primary,
                         indicatorColor = TealContainer
                     ),
                     modifier = Modifier.testTag("nav_tab_prescriptions")
-                )
-
-                // Tab 4: Analytics & Family
-                NavigationBarItem(
-                    selected = selectedTab == 4,
-                    onClick = { viewModel.setTab(4) },
-                    icon = {
-                        Icon(
-                            imageVector = if (selectedTab == 4) Icons.Default.BarChart else Icons.Outlined.Analytics,
-                            contentDescription = "Analytics"
-                        )
-                    },
-                    label = { Text("Insights", fontSize = 11.sp, fontWeight = if (selectedTab == 4) FontWeight.Bold else FontWeight.Normal) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = MaterialTheme.colorScheme.primary,
-                        indicatorColor = TealContainer
-                    ),
-                    modifier = Modifier.testTag("nav_tab_insights")
                 )
             }
         }
@@ -363,7 +386,25 @@ fun MediVaultApp(
                         onExportSummaryClick = { viewModel.showExportSummary.value = true }
                     )
 
-                    1 -> BillsScreen(
+                    1 -> TimelineScreen(
+                        timelineItems = filteredTimeline,
+                        members = members,
+                        selectedMemberId = selectedMemberId,
+                        searchQuery = searchQuery,
+                        selectedTypeFilter = timelineFilterType,
+                        onlyAttachmentsFilter = timelineOnlyAttachments,
+                        onSelectMember = { viewModel.selectMember(it) },
+                        onAddMemberClick = { viewModel.showAddMemberDialog.value = true },
+                        onSearchChange = { viewModel.setSearchQuery(it) },
+                        onTypeFilterChange = { viewModel.setTimelineFilterType(it) },
+                        onToggleOnlyAttachments = { viewModel.setTimelineOnlyAttachments(it) },
+                        onViewBill = { viewModel.viewingBill.value = it },
+                        onViewReport = { viewModel.viewingReport.value = it },
+                        onViewPrescription = { viewModel.viewingPrescription.value = it },
+                        onOpenAttachmentViewer = { uri, title -> viewModel.openAttachmentViewer(uri, title) }
+                    )
+
+                    2 -> BillsScreen(
                         bills = filteredBills,
                         members = members,
                         selectedMemberId = selectedMemberId,
@@ -388,7 +429,7 @@ fun MediVaultApp(
                         onTogglePaid = { viewModel.toggleBillPaid(it) }
                     )
 
-                    2 -> ReportsScreen(
+                    3 -> ReportsScreen(
                         reports = filteredReports,
                         members = members,
                         selectedMemberId = selectedMemberId,
@@ -413,7 +454,7 @@ fun MediVaultApp(
                         parseBiomarkers = { viewModel.parseBiomarkers(it) }
                     )
 
-                    3 -> PrescriptionsScreen(
+                    4 -> PrescriptionsScreen(
                         prescriptions = filteredPrescriptions,
                         medications = allMedications,
                         members = members,
@@ -435,7 +476,7 @@ fun MediVaultApp(
                         onRefillClick = { viewModel.showRefillDialog.value = it }
                     )
 
-                    4 -> AnalyticsAndFamilyScreen(
+                    5 -> AnalyticsAndFamilyScreen(
                         summary = dashboardSummary,
                         members = members,
                         selectedMemberId = selectedMemberId,
@@ -466,9 +507,9 @@ fun MediVaultApp(
                 viewModel.showAddBillSheet.value = false
                 viewModel.editingBill.value = null
             },
-            onSave = { id, memberId, provider, doctor, date, category, invoiceNum, total, insured, outOfPocket, status, dueDate, notes, lineItems ->
+            onSave = { id, memberId, provider, doctor, date, category, invoiceNum, total, insured, outOfPocket, status, dueDate, notes, lineItems, attachmentUri, attachmentName, aiExtractedNotes ->
                 viewModel.saveBill(
-                    id, memberId, provider, doctor, date, category, invoiceNum, total, insured, outOfPocket, status, dueDate, notes, lineItems
+                    id, memberId, provider, doctor, date, category, invoiceNum, total, insured, outOfPocket, status, dueDate, notes, lineItems, attachmentUri, attachmentName, aiExtractedNotes
                 )
             }
         )
@@ -483,9 +524,9 @@ fun MediVaultApp(
                 viewModel.showAddReportSheet.value = false
                 viewModel.editingReport.value = null
             },
-            onSave = { id, memberId, testName, category, reportDate, facility, doctor, summary, status, biomarkers, followUpDate, notes ->
+            onSave = { id, memberId, testName, category, reportDate, facility, doctor, summary, status, biomarkers, followUpDate, notes, attachmentUri, attachmentName, aiExtractedNotes ->
                 viewModel.saveReport(
-                    id, memberId, testName, category, reportDate, facility, doctor, summary, status, biomarkers, followUpDate, notes
+                    id, memberId, testName, category, reportDate, facility, doctor, summary, status, biomarkers, followUpDate, notes, attachmentUri, attachmentName, aiExtractedNotes
                 )
             }
         )
@@ -507,9 +548,9 @@ fun MediVaultApp(
                 viewModel.showAddPrescriptionSheet.value = false
                 viewModel.editingPrescription.value = null
             },
-            onSave = { rxId, memberId, doctor, specialty, clinic, diagnosis, datePrescribed, durationDays, isOngoing, followUpDate, advice, status, medicationsList ->
+            onSave = { rxId, memberId, doctor, specialty, clinic, diagnosis, datePrescribed, durationDays, isOngoing, followUpDate, advice, status, medicationsList, attachmentUri, attachmentName, aiExtractedNotes ->
                 viewModel.savePrescriptionWithMedications(
-                    rxId, memberId, doctor, specialty, clinic, diagnosis, datePrescribed, durationDays, isOngoing, followUpDate, advice, status, medicationsList
+                    rxId, memberId, doctor, specialty, clinic, diagnosis, datePrescribed, durationDays, isOngoing, followUpDate, advice, status, medicationsList, attachmentUri, attachmentName, aiExtractedNotes
                 )
             }
         )
@@ -602,6 +643,15 @@ fun MediVaultApp(
             medications = allMedications,
             selectedMemberId = selectedMemberId,
             onDismiss = { viewModel.showExportSummary.value = false }
+        )
+    }
+
+    // Full screen document viewer
+    if (!viewingAttachmentUri.isNullOrBlank()) {
+        AttachmentFullScreenViewerDialog(
+            uri = viewingAttachmentUri!!,
+            title = viewingAttachmentTitle ?: "Scanned Document",
+            onDismiss = { viewModel.closeAttachmentViewer() }
         )
     }
 }

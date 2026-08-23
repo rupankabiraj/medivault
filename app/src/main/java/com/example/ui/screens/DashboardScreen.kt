@@ -76,8 +76,8 @@ import com.example.ui.theme.StatusWarning
 import com.example.ui.theme.StatusWarningContainer
 import com.example.ui.theme.TealContainer
 import com.example.ui.theme.TealPrimary
-import com.example.ui.viewmodel.DashboardSummary
-import com.example.ui.viewmodel.ScheduledDoseItem
+import com.example.data.model.DashboardSummary
+import com.example.data.model.ScheduledDoseItem
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

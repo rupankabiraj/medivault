@@ -1,27 +1,35 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.ai.DocumentOcrService
 import com.example.data.local.AppDatabase
 import com.example.data.model.BillCategory
 import com.example.data.model.Biomarker
+import com.example.data.model.CategorySpending
+import com.example.data.model.DashboardSummary
 import com.example.data.model.DoseLog
 import com.example.data.model.DoseStatus
 import com.example.data.model.FamilyMember
+import com.example.data.model.InferredBillData
+import com.example.data.model.InferredPrescriptionData
+import com.example.data.model.InferredReportData
 import com.example.data.model.MedicalBill
+import com.example.data.model.MedicalRecordType
 import com.example.data.model.MedicalReport
+import com.example.data.model.MedicalTimelineItem
 import com.example.data.model.Medication
-import com.example.data.model.MedicineForm
-import com.example.data.model.MedicineFrequency
-import com.example.data.model.MedicineTiming
 import com.example.data.model.PaymentStatus
 import com.example.data.model.Prescription
 import com.example.data.model.PrescriptionStatus
 import com.example.data.model.ReportCategory
 import com.example.data.model.ReportStatus
+import com.example.data.model.ScheduledDoseItem
 import com.example.data.model.TimeSlot
 import com.example.data.repository.MedicalRecordsRepository
+import com.example.data.util.AttachmentUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -33,72 +41,73 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-data class DashboardSummary(
-    val totalSpent: Double = 0.0,
-    val insuranceCovered: Double = 0.0,
-    val outOfPocket: Double = 0.0,
-    val pendingBillsCount: Int = 0,
-    val pendingBillsTotal: Double = 0.0,
-    val activeRxCount: Int = 0,
-    val lowStockMedsCount: Int = 0,
-    val attentionReportsCount: Int = 0,
-    val todayScheduledDosesCount: Int = 0,
-    val todayTakenDosesCount: Int = 0,
-    val categoryExpenses: Map<String, Double> = emptyMap(),
-    val monthlyExpenses: Map<String, Double> = emptyMap()
-)
-
-data class ScheduledDoseItem(
-    val medication: Medication,
-    val member: FamilyMember?,
-    val slot: TimeSlot,
-    val isTaken: Boolean,
-    val prescription: Prescription?
-)
-
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository: MedicalRecordsRepository
-    val todayString: String
+    private val database = AppDatabase.getDatabase(application)
+    private val repository = MedicalRecordsRepository(database)
 
-    init {
-        val db = AppDatabase.getDatabase(application, viewModelScope)
-        repository = MedicalRecordsRepository(db)
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        todayString = sdf.format(Date())
-    }
+    private val ocrService = DocumentOcrService(application.applicationContext)
 
-    // UI Navigation & Filters
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    private val todayString: String
+        get() = dateFormat.format(Date())
+
+    // -------------------------------------------------------------
+    // NAVIGATION & UI CONTROLS
+    // -------------------------------------------------------------
     private val _selectedTab = MutableStateFlow(0)
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
 
-    private val _selectedMemberId = MutableStateFlow<Long?>(null) // null = all family members
+    private val _selectedMemberId = MutableStateFlow<Long?>(null)
     val selectedMemberId: StateFlow<Long?> = _selectedMemberId.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    // Bill Filters
     private val _billCategoryFilter = MutableStateFlow<String?>(null)
     val billCategoryFilter: StateFlow<String?> = _billCategoryFilter.asStateFlow()
 
     private val _billStatusFilter = MutableStateFlow<String?>(null)
     val billStatusFilter: StateFlow<String?> = _billStatusFilter.asStateFlow()
 
+    // Report Filters
     private val _reportCategoryFilter = MutableStateFlow<String?>(null)
     val reportCategoryFilter: StateFlow<String?> = _reportCategoryFilter.asStateFlow()
 
     private val _reportStatusFilter = MutableStateFlow<String?>(null)
     val reportStatusFilter: StateFlow<String?> = _reportStatusFilter.asStateFlow()
 
-    // Dialog state
+    // Timeline Filters
+    private val _timelineFilterType = MutableStateFlow<MedicalRecordType?>(null)
+    val timelineFilterType: StateFlow<MedicalRecordType?> = _timelineFilterType.asStateFlow()
+
+    private val _timelineOnlyAttachments = MutableStateFlow(false)
+    val timelineOnlyAttachments: StateFlow<Boolean> = _timelineOnlyAttachments.asStateFlow()
+
+    // AI OCR Status
+    private val _isOcrLoading = MutableStateFlow(false)
+    val isOcrLoading: StateFlow<Boolean> = _isOcrLoading.asStateFlow()
+
+    private val _ocrStatusMessage = MutableStateFlow<String?>(null)
+    val ocrStatusMessage: StateFlow<String?> = _ocrStatusMessage.asStateFlow()
+
+    // Full Screen Attachment Viewer State
+    val viewingAttachmentImageUri = MutableStateFlow<String?>(null)
+    val viewingAttachmentTitle = MutableStateFlow<String?>(null)
+
+    // Active Dialog States
     val showAddBillSheet = MutableStateFlow(false)
     val editingBill = MutableStateFlow<MedicalBill?>(null)
+    val viewingBill = MutableStateFlow<MedicalBill?>(null)
 
     val showAddReportSheet = MutableStateFlow(false)
     val editingReport = MutableStateFlow<MedicalReport?>(null)
+    val viewingReport = MutableStateFlow<MedicalReport?>(null)
 
     val showAddPrescriptionSheet = MutableStateFlow(false)
     val editingPrescription = MutableStateFlow<Prescription?>(null)
+    val viewingPrescription = MutableStateFlow<Prescription?>(null)
 
     val showAddMemberDialog = MutableStateFlow(false)
     val editingMember = MutableStateFlow<FamilyMember?>(null)
@@ -106,12 +115,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val showRefillDialog = MutableStateFlow<Medication?>(null)
     val showExportSummary = MutableStateFlow(false)
 
-    // Detailed viewing state
-    val viewingBill = MutableStateFlow<MedicalBill?>(null)
-    val viewingReport = MutableStateFlow<MedicalReport?>(null)
-    val viewingPrescription = MutableStateFlow<Prescription?>(null)
-
-    // Data streams from repository
+    // -------------------------------------------------------------
+    // DATA STREAMS
+    // -------------------------------------------------------------
     val allMembers: StateFlow<List<FamilyMember>> = repository.allMembers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -231,77 +237,229 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         items.sortedBy { it.slot.ordinal }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Dashboard Analytics Summary
-    val dashboardSummary: StateFlow<DashboardSummary> = combine(
+    // Unified Date-Wise Attachments & Timeline Stream
+    val filteredTimeline: StateFlow<List<MedicalTimelineItem>> = combine(
         allBills,
         allReports,
         allPrescriptions,
-        allMedications,
-        todayScheduledDoses,
+        allMembers,
         selectedMemberId
-    ) { args: Array<Any?> ->
-        @Suppress("UNCHECKED_CAST")
-        val bills = args[0] as List<MedicalBill>
-        @Suppress("UNCHECKED_CAST")
-        val reports = args[1] as List<MedicalReport>
-        @Suppress("UNCHECKED_CAST")
-        val rxs = args[2] as List<Prescription>
-        @Suppress("UNCHECKED_CAST")
-        val meds = args[3] as List<Medication>
-        @Suppress("UNCHECKED_CAST")
-        val doses = args[4] as List<ScheduledDoseItem>
-        val memberId = args[5] as Long?
-
-        val targetBills = bills.filter { memberId == null || it.memberId == memberId }
-        val targetReports = reports.filter { memberId == null || it.memberId == memberId }
-        val targetRxs = rxs.filter { memberId == null || it.memberId == memberId }
-        val targetMeds = meds.filter { memberId == null || it.memberId == memberId }
-
-        val totalSpent = targetBills.sumOf { it.totalAmount }
-        val insuranceCovered = targetBills.sumOf { it.insuranceCoveredAmount }
-        val outOfPocket = targetBills.sumOf { it.outOfPocketAmount }
-
-        val pendingBills = targetBills.filter { it.paymentStatus == PaymentStatus.PENDING.name || it.paymentStatus == PaymentStatus.CLAIM_SUBMITTED.name }
-        val pendingCount = pendingBills.size
-        val pendingTotal = pendingBills.sumOf { it.totalAmount }
-
-        val activeRx = targetRxs.count { it.status == PrescriptionStatus.ACTIVE.name }
-        val lowStockCount = targetMeds.count { it.isActive && it.pillsRemaining <= it.refillThreshold }
-        val attentionReports = targetReports.count { it.status == ReportStatus.ATTENTION_REQUIRED.name || it.status == ReportStatus.CRITICAL.name }
-
-        val scheduledDoseCount = doses.size
-        val takenDoseCount = doses.count { it.isTaken }
-
-        val catMap = mutableMapOf<String, Double>()
-        for (b in targetBills) {
-            val cat = b.category
-            catMap[cat] = (catMap[cat] ?: 0.0) + b.totalAmount
+    ) { bills, reports, rxs, members, memberId ->
+        buildTimelineList(bills, reports, rxs, members, memberId, _timelineFilterType.value, _timelineOnlyAttachments.value, _searchQuery.value)
+    }.combine(_timelineFilterType) { currentList, typeFilter ->
+        if (typeFilter == null) currentList else currentList.filter { it.recordType == typeFilter }
+    }.combine(_timelineOnlyAttachments) { currentList, onlyAttachments ->
+        if (!onlyAttachments) currentList else currentList.filter { it.hasAttachment }
+    }.combine(_searchQuery) { currentList, query ->
+        if (query.isBlank()) currentList else currentList.filter {
+            it.title.contains(query, ignoreCase = true) ||
+                    it.subtitle.contains(query, ignoreCase = true) ||
+                    it.patientName.contains(query, ignoreCase = true) ||
+                    (it.aiExtractedNotes?.contains(query, ignoreCase = true) == true)
         }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private fun buildTimelineList(
+        bills: List<MedicalBill>,
+        reports: List<MedicalReport>,
+        rxs: List<Prescription>,
+        members: List<FamilyMember>,
+        memberId: Long?,
+        typeFilter: MedicalRecordType?,
+        onlyAttachments: Boolean,
+        query: String
+    ): List<MedicalTimelineItem> {
+        val memberMap = members.associateBy { it.id }
+        val items = mutableListOf<MedicalTimelineItem>()
+
+        // 1. Map Bills
+        if (typeFilter == null || typeFilter == MedicalRecordType.BILL) {
+            for (bill in bills) {
+                if (memberId != null && bill.memberId != memberId) continue
+                if (onlyAttachments && bill.attachmentUri.isNullOrBlank()) continue
+                if (query.isNotBlank() &&
+                    !bill.providerName.contains(query, ignoreCase = true) &&
+                    !bill.doctorName.contains(query, ignoreCase = true) &&
+                    !bill.notes.contains(query, ignoreCase = true)
+                ) continue
+
+                val member = memberMap[bill.memberId]
+                items.add(
+                    MedicalTimelineItem(
+                        id = "bill_${bill.id}",
+                        recordType = MedicalRecordType.BILL,
+                        title = bill.providerName,
+                        subtitle = if (bill.doctorName.isNotBlank()) "Dr. ${bill.doctorName} • ${bill.category}" else bill.category,
+                        timestamp = bill.billDate,
+                        formattedDate = AttachmentUtils.formatDate(bill.billDate),
+                        memberId = bill.memberId,
+                        patientName = member?.name ?: "Self",
+                        patientAvatarColor = member?.avatarColorHex ?: "#00897B",
+                        statusText = bill.paymentStatus,
+                        amountOrHighlight = String.format(Locale.US, "₹%.2f", bill.totalAmount),
+                        attachmentUri = bill.attachmentUri,
+                        attachmentName = bill.attachmentName,
+                        aiExtractedNotes = bill.aiExtractedNotes,
+                        billSource = bill
+                    )
+                )
+            }
+        }
+
+        // 2. Map Reports
+        if (typeFilter == null || typeFilter == MedicalRecordType.REPORT) {
+            for (report in reports) {
+                if (memberId != null && report.memberId != memberId) continue
+                if (onlyAttachments && report.attachmentUri.isNullOrBlank()) continue
+                if (query.isNotBlank() &&
+                    !report.testName.contains(query, ignoreCase = true) &&
+                    !report.labOrFacility.contains(query, ignoreCase = true) &&
+                    !report.summaryFindings.contains(query, ignoreCase = true)
+                ) continue
+
+                val member = memberMap[report.memberId]
+                items.add(
+                    MedicalTimelineItem(
+                        id = "report_${report.id}",
+                        recordType = MedicalRecordType.REPORT,
+                        title = report.testName,
+                        subtitle = "${report.labOrFacility} • ${report.category}",
+                        timestamp = report.reportDate,
+                        formattedDate = AttachmentUtils.formatDate(report.reportDate),
+                        memberId = report.memberId,
+                        patientName = member?.name ?: "Self",
+                        patientAvatarColor = member?.avatarColorHex ?: "#00ACC1",
+                        statusText = report.status,
+                        amountOrHighlight = report.summaryFindings.take(45),
+                        attachmentUri = report.attachmentUri,
+                        attachmentName = report.attachmentName,
+                        aiExtractedNotes = report.aiExtractedNotes,
+                        reportSource = report
+                    )
+                )
+            }
+        }
+
+        // 3. Map Prescriptions
+        if (typeFilter == null || typeFilter == MedicalRecordType.PRESCRIPTION) {
+            for (rx in rxs) {
+                if (memberId != null && rx.memberId != memberId) continue
+                if (onlyAttachments && rx.attachmentUri.isNullOrBlank()) continue
+                if (query.isNotBlank() &&
+                    !rx.diagnosis.contains(query, ignoreCase = true) &&
+                    !rx.doctorName.contains(query, ignoreCase = true) &&
+                    !rx.clinicOrHospital.contains(query, ignoreCase = true)
+                ) continue
+
+                val member = memberMap[rx.memberId]
+                items.add(
+                    MedicalTimelineItem(
+                        id = "rx_${rx.id}",
+                        recordType = MedicalRecordType.PRESCRIPTION,
+                        title = rx.diagnosis,
+                        subtitle = "Dr. ${rx.doctorName} (${rx.specialty}) • ${rx.clinicOrHospital}",
+                        timestamp = rx.datePrescribed,
+                        formattedDate = AttachmentUtils.formatDate(rx.datePrescribed),
+                        memberId = rx.memberId,
+                        patientName = member?.name ?: "Self",
+                        patientAvatarColor = member?.avatarColorHex ?: "#FB8C00",
+                        statusText = rx.status,
+                        amountOrHighlight = "${rx.durationDays} Days Course",
+                        attachmentUri = rx.attachmentUri,
+                        attachmentName = rx.attachmentName,
+                        aiExtractedNotes = rx.aiExtractedNotes,
+                        prescriptionSource = rx
+                    )
+                )
+            }
+        }
+
+        return items.sortedByDescending { it.timestamp }
+    }
+
+    // Dashboard Summary Statistics
+    val dashboardSummary: StateFlow<DashboardSummary> = combine(
+        combine(allBills, allReports, allPrescriptions) { bills, reports, rxs ->
+            Triple(bills, reports, rxs)
+        },
+        combine(allMedications, todayDoseLogs, selectedMemberId) { meds, logs, memberId ->
+            Triple(meds, logs, memberId)
+        }
+    ) { (bills, reports, rxs), (meds, logs, memberId) ->
+        val mBills = bills.filter { memberId == null || it.memberId == memberId }
+        val mReports = reports.filter { memberId == null || it.memberId == memberId }
+        val mRxs = rxs.filter { memberId == null || it.memberId == memberId }
+        val mMeds = meds.filter { it.isActive && (memberId == null || it.memberId == memberId) }
+
+        val totalBilled = mBills.sumOf { it.totalAmount }
+        val totalInsurance = mBills.sumOf { it.insuranceCoveredAmount }
+        val totalOutOfPocket = mBills.sumOf { it.outOfPocketAmount }
+        val pendingBills = mBills.count { it.paymentStatus == PaymentStatus.PENDING.name }
+
+        val totalActivePrescriptions = mRxs.count { it.status == PrescriptionStatus.ACTIVE.name }
+        val lowStockMeds = mMeds.count { it.pillsRemaining <= it.refillThreshold }
+        val attentionReports = mReports.count { it.status == ReportStatus.ATTENTION_REQUIRED.name || it.status == ReportStatus.CRITICAL.name }
+
+        // Category spendings
+        val spendMap = mBills.groupBy { it.category }
+        val catSpendings = spendMap.map { (cat, bList) ->
+            val sum = bList.sumOf { it.totalAmount }
+            val pct = if (totalBilled > 0) ((sum / totalBilled) * 100).toFloat() else 0f
+            CategorySpending(
+                category = cat,
+                totalAmount = sum,
+                percentage = pct,
+                colorHex = when (cat) {
+                    BillCategory.CONSULTATION.name -> "#00897B"
+                    BillCategory.PHARMACY.name -> "#00ACC1"
+                    BillCategory.DIAGNOSTIC_LAB.name -> "#43A047"
+                    BillCategory.SURGERY_PROCEDURE.name -> "#E53935"
+                    BillCategory.HOSPITAL_STAY.name -> "#FB8C00"
+                    else -> "#8E24AA"
+                }
+            )
+        }.sortedByDescending { it.totalAmount }
+
+        val catExpensesMap = mutableMapOf<String, Double>()
+        catSpendings.forEach { catExpensesMap[it.category] = it.totalAmount }
 
         val monthFormat = SimpleDateFormat("MMM yyyy", Locale.getDefault())
-        val monthMap = mutableMapOf<String, Double>()
-        for (b in targetBills.sortedBy { it.billDate }) {
-            val m = monthFormat.format(Date(b.billDate))
-            monthMap[m] = (monthMap[m] ?: 0.0) + b.totalAmount
+        val monthlyExpensesMap = mutableMapOf<String, Double>()
+        mBills.sortedBy { it.billDate }.forEach { b ->
+            val monthKey = monthFormat.format(Date(b.billDate))
+            monthlyExpensesMap[monthKey] = (monthlyExpensesMap[monthKey] ?: 0.0) + b.totalAmount
         }
 
+        val totalDosesToday = mMeds.sumOf {
+            (if (it.slotMorning) 1 else 0) +
+                    (if (it.slotAfternoon) 1 else 0) +
+                    (if (it.slotEvening) 1 else 0) +
+                    (if (it.slotNight) 1 else 0)
+        }
+        val takenCount = logs.count { it.status == DoseStatus.TAKEN.name }
+        val adherenceRate = if (totalDosesToday > 0) ((takenCount.toFloat() / totalDosesToday.toFloat()) * 100).toInt().coerceAtMost(100) else 100
+
         DashboardSummary(
-            totalSpent = totalSpent,
-            insuranceCovered = insuranceCovered,
-            outOfPocket = outOfPocket,
-            pendingBillsCount = pendingCount,
-            pendingBillsTotal = pendingTotal,
-            activeRxCount = activeRx,
-            lowStockMedsCount = lowStockCount,
+            totalBilledAmount = totalBilled,
+            totalInsuranceCovered = totalInsurance,
+            totalOutOfPocket = totalOutOfPocket,
+            pendingBillsCount = pendingBills,
+            totalActivePrescriptions = totalActivePrescriptions,
+            lowStockMedsCount = lowStockMeds,
+            totalReportsCount = mReports.size,
             attentionReportsCount = attentionReports,
-            todayScheduledDosesCount = scheduledDoseCount,
-            todayTakenDosesCount = takenDoseCount,
-            categoryExpenses = catMap,
-            monthlyExpenses = monthMap
+            todayDosesCount = totalDosesToday,
+            todayDosesTakenCount = takenCount,
+            adherenceRatePercent = adherenceRate,
+            categorySpendingList = catSpendings,
+            categoryExpenses = catExpensesMap,
+            monthlyExpenses = monthlyExpensesMap
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardSummary())
 
-    // Tab Navigation
+    // -------------------------------------------------------------
+    // CONTROLLER & EVENT METHODS
+    // -------------------------------------------------------------
     fun setTab(index: Int) {
         _selectedTab.value = index
     }
@@ -315,19 +473,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setBillCategoryFilter(category: String?) {
-        _billCategoryFilter.value = if (_billCategoryFilter.value == category) null else category
+        _billCategoryFilter.value = category
     }
 
     fun setBillStatusFilter(status: String?) {
-        _billStatusFilter.value = if (_billStatusFilter.value == status) null else status
+        _billStatusFilter.value = status
     }
 
     fun setReportCategoryFilter(category: String?) {
-        _reportCategoryFilter.value = if (_reportCategoryFilter.value == category) null else category
+        _reportCategoryFilter.value = category
     }
 
     fun setReportStatusFilter(status: String?) {
-        _reportStatusFilter.value = if (_reportStatusFilter.value == status) null else status
+        _reportStatusFilter.value = status
+    }
+
+    fun setTimelineFilterType(type: MedicalRecordType?) {
+        _timelineFilterType.value = type
+    }
+
+    fun setTimelineOnlyAttachments(onlyAttachments: Boolean) {
+        _timelineOnlyAttachments.value = onlyAttachments
+    }
+
+    // Attachment Viewer Actions
+    fun openAttachmentViewer(uri: String?, title: String?) {
+        if (!uri.isNullOrBlank()) {
+            viewingAttachmentImageUri.value = uri
+            viewingAttachmentTitle.value = title ?: "Attached Document"
+        }
+    }
+
+    fun closeAttachmentViewer() {
+        viewingAttachmentImageUri.value = null
+        viewingAttachmentTitle.value = null
     }
 
     // Bill Actions
@@ -345,7 +524,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         status: String,
         dueDate: Long?,
         notes: String,
-        lineItems: String
+        lineItems: String,
+        attachmentUri: String? = null,
+        attachmentName: String? = null,
+        aiExtractedNotes: String? = null
     ) {
         viewModelScope.launch {
             val bill = MedicalBill(
@@ -362,7 +544,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 paymentStatus = status,
                 dueDate = dueDate,
                 notes = notes.trim(),
-                lineItemsRaw = lineItems.trim()
+                lineItemsRaw = lineItems.trim(),
+                attachmentUri = attachmentUri,
+                attachmentName = attachmentName,
+                aiExtractedNotes = aiExtractedNotes
             )
             if (id == 0L) {
                 repository.insertBill(bill)
@@ -407,7 +592,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         status: String,
         biomarkers: String,
         followUpDate: Long?,
-        notes: String
+        notes: String,
+        attachmentUri: String? = null,
+        attachmentName: String? = null,
+        aiExtractedNotes: String? = null
     ) {
         viewModelScope.launch {
             val report = MedicalReport(
@@ -422,7 +610,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 status = status,
                 biomarkersRaw = biomarkers.trim(),
                 followUpDate = followUpDate,
-                notes = notes.trim()
+                notes = notes.trim(),
+                attachmentUri = attachmentUri,
+                attachmentName = attachmentName,
+                aiExtractedNotes = aiExtractedNotes
             )
             if (id == 0L) {
                 repository.insertReport(report)
@@ -457,7 +648,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         followUpDate: Long?,
         advice: String,
         status: String,
-        medicationsList: List<Medication>
+        medicationsList: List<Medication>,
+        attachmentUri: String? = null,
+        attachmentName: String? = null,
+        aiExtractedNotes: String? = null
     ) {
         viewModelScope.launch {
             val rx = Prescription(
@@ -472,58 +666,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isOngoing = isOngoing,
                 followUpDate = followUpDate,
                 doctorAdvice = advice.trim(),
-                status = status
+                status = status,
+                attachmentUri = attachmentUri,
+                attachmentName = attachmentName,
+                aiExtractedNotes = aiExtractedNotes
             )
-            val generatedRxId = if (rxId == 0L) {
-                repository.insertPrescription(rx)
-            } else {
-                repository.updatePrescription(rx)
-                rxId
-            }
-
-            if (rxId != 0L) {
-                // Delete old meds and re-insert
-                // or update
-            }
-            for (med in medicationsList) {
-                repository.insertMedication(med.copy(prescriptionId = generatedRxId, memberId = memberId))
-            }
-
+            val updatedMeds = medicationsList.map { it.copy(memberId = memberId) }
+            repository.savePrescriptionWithMedications(rx, updatedMeds)
             showAddPrescriptionSheet.value = false
             editingPrescription.value = null
         }
     }
 
-    fun deletePrescription(rx: Prescription) {
+    fun deletePrescription(prescription: Prescription) {
         viewModelScope.launch {
-            repository.deletePrescription(rx)
-            if (viewingPrescription.value?.id == rx.id) {
+            repository.deletePrescription(prescription)
+            if (viewingPrescription.value?.id == prescription.id) {
                 viewingPrescription.value = null
             }
         }
     }
 
-    fun refillMedication(medicationId: Long, pillsCount: Int) {
+    fun refillMedication(medicationId: Long, addedCount: Int) {
         viewModelScope.launch {
-            repository.refillMedication(medicationId, pillsCount)
+            repository.refillMedication(medicationId, addedCount)
             showRefillDialog.value = null
         }
     }
 
-    // Dose Logging
     fun toggleDose(doseItem: ScheduledDoseItem) {
         viewModelScope.launch {
             repository.logDose(
                 medicationId = doseItem.medication.id,
                 memberId = doseItem.medication.memberId,
-                dayString = todayString,
+                dateDayString = todayString,
                 slot = doseItem.slot.name,
-                status = if (doseItem.isTaken) DoseStatus.SKIPPED else DoseStatus.TAKEN
+                isTaken = !doseItem.isTaken
             )
         }
     }
 
-    // Family Member Management
+    // Family Member Actions
     fun saveMember(
         id: Long = 0,
         name: String,
@@ -538,12 +721,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val member = FamilyMember(
                 id = id,
                 name = name.trim(),
-                relationship = relationship.trim(),
+                relationship = relationship,
                 age = age,
-                bloodGroup = bloodGroup.trim(),
+                bloodGroup = bloodGroup,
                 allergies = allergies.trim(),
                 emergencyContact = emergencyContact.trim(),
-                isPrimary = relationship.equals("Self", ignoreCase = true),
                 avatarColorHex = colorHex
             )
             if (id == 0L) {
@@ -565,24 +747,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Helpers
     fun parseBiomarkers(raw: String): List<Biomarker> {
         if (raw.isBlank()) return emptyList()
         val list = mutableListOf<Biomarker>()
-        val lines = raw.split("\n")
-        for (line in lines) {
+        for (line in raw.lines()) {
             val parts = line.split("|")
-            if (parts.size >= 4) {
+            if (parts.size >= 2) {
                 val name = parts[0].trim()
-                val value = parts[1].trim()
-                val unit = parts[2].trim()
-                val range = parts[3].trim()
-                val interpretation = if (parts.size > 4) parts[4].trim() else "Normal"
-                val isAbnormal = interpretation.equals("High", ignoreCase = true) ||
-                        interpretation.equals("Low", ignoreCase = true) ||
-                        interpretation.equals("Abnormal", ignoreCase = true) ||
-                        interpretation.equals("Critical", ignoreCase = true)
-                list.add(Biomarker(name, value, unit, range, isAbnormal, interpretation))
+                val value = parts.getOrNull(1)?.trim() ?: ""
+                val unit = parts.getOrNull(2)?.trim() ?: ""
+                val range = parts.getOrNull(3)?.trim() ?: ""
+                val flag = parts.getOrNull(4)?.trim() ?: "Normal"
+                val isAbnormal = !flag.equals("Normal", ignoreCase = true)
+                list.add(
+                    Biomarker(
+                        name = name,
+                        value = value,
+                        unit = unit,
+                        referenceRange = range,
+                        isAbnormal = isAbnormal,
+                        interpretation = flag
+                    )
+                )
             }
         }
         return list
