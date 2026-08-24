@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Medication
 import androidx.compose.material.icons.outlined.Receipt
 import androidx.compose.material.icons.outlined.Science
@@ -55,6 +56,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +71,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.DashboardSummary
 import com.example.data.model.MedicalRecordType
 import com.example.data.model.ScheduledDoseItem
+import com.example.ui.dialogs.AboutAppDialog
 import com.example.ui.dialogs.AddEditBillSheet
 import com.example.ui.dialogs.AddEditMemberDialog
 import com.example.ui.dialogs.AddEditPrescriptionSheet
@@ -153,6 +158,8 @@ fun MediVaultApp(
     val refillMedication by viewModel.showRefillDialog.collectAsStateWithLifecycle()
     val showExportSummary by viewModel.showExportSummary.collectAsStateWithLifecycle()
 
+    var showAboutDialog by remember { mutableStateOf(false) }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -208,6 +215,16 @@ fun MediVaultApp(
                         Icon(
                             imageVector = Icons.Outlined.FileDownload,
                             contentDescription = "Export Dossier",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(
+                        onClick = { showAboutDialog = true },
+                        modifier = Modifier.testTag("topbar_about_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = "About MediVault & Creator",
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -490,7 +507,8 @@ fun MediVaultApp(
                             viewModel.showAddMemberDialog.value = true
                         },
                         onDeleteMember = { viewModel.deleteMember(it) },
-                        onExportSummaryClick = { viewModel.showExportSummary.value = true }
+                        onExportSummaryClick = { viewModel.showExportSummary.value = true },
+                        onAboutClick = { showAboutDialog = true }
                     )
                 }
             }
@@ -652,6 +670,12 @@ fun MediVaultApp(
             uri = viewingAttachmentUri!!,
             title = viewingAttachmentTitle ?: "Scanned Document",
             onDismiss = { viewModel.closeAttachmentViewer() }
+        )
+    }
+
+    if (showAboutDialog) {
+        AboutAppDialog(
+            onDismiss = { showAboutDialog = false }
         )
     }
 }
