@@ -1,5 +1,7 @@
 package com.example.ui.dialogs
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,16 +24,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.Medication
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -41,6 +48,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,12 +67,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.data.ai.ApiKeyManager
 import com.example.data.model.Biomarker
 import com.example.data.model.FamilyMember
 import com.example.data.model.MedicalBill
@@ -1229,8 +1240,13 @@ fun HealthSummaryExportDialog(
 
 @Composable
 fun AboutAppDialog(
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenApiKeySettings: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    var showApiKeyConfig by remember { mutableStateOf(false) }
+    val isAiConfigured = remember { ApiKeyManager.isConfigured(context) }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -1326,6 +1342,60 @@ fun AboutAppDialog(
                     }
                 }
 
+                // Smart Multi-Tier AI & OCR Scanner Configuration Card
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isAiConfigured) EmeraldTertiary.copy(alpha = 0.4f) else TealPrimary.copy(alpha = 0.4f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showApiKeyConfig = true }
+                        .testTag("btn_open_api_key_settings")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(if (isAiConfigured) EmeraldTertiary.copy(alpha = 0.2f) else TealContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isAiConfigured) Icons.Default.AutoAwesome else Icons.Default.Key,
+                                contentDescription = null,
+                                tint = if (isAiConfigured) EmeraldTertiary else TealPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Smart OCR & AI Scanner",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (isAiConfigured) "Gemini 2.5 Flash (${ApiKeyManager.getMaskedKey(context)})" else "Tier 1 On-Device ML Kit Active",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isAiConfigured) EmeraldTertiary else TealPrimary
+                            )
+                        }
+
+                        Text(
+                            text = "Settings",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = TealPrimary
+                        )
+                    }
+                }
+
                 // Key Architectural Highlights
                 Column(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1363,6 +1433,279 @@ fun AboutAppDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Close", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+
+    if (showApiKeyConfig) {
+        ApiKeySettingsDialog(
+            onDismiss = { showApiKeyConfig = false }
+        )
+    }
+}
+
+@Composable
+fun ApiKeySettingsDialog(
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var apiKeyText by remember { mutableStateOf(ApiKeyManager.getApiKey(context)) }
+    var isPasswordVisible by remember { mutableStateOf(false) }
+    var isCustom by remember { mutableStateOf(ApiKeyManager.hasCustomKey(context)) }
+    var isConfigured by remember { mutableStateOf(ApiKeyManager.isConfigured(context)) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .padding(vertical = 24.dp)
+                .testTag("api_key_settings_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(24.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(TealContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Gemini AI Settings",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "High-precision OCR Scanner",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                HorizontalDivider()
+
+                // Explanation
+                Text(
+                    text = "MediVault features a 3-tier smart scanning architecture so anyone can extract bills, lab tests, and prescriptions effortlessly.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // 3-Tier Mode Cards
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Tier 1
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, TealPrimary.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(TealContainer), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.HealthAndSafety, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(18.dp))
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Tier 1: On-Device ML Kit OCR", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
+                                Text("100% offline, zero setup, no key or account required.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text("Active", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = TealPrimary)
+                        }
+                    }
+
+                    // Tier 2 & 3
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isConfigured) EmeraldTertiary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isConfigured) EmeraldTertiary.copy(alpha = 0.4f) else TealPrimary.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(if (isConfigured) EmeraldTertiary.copy(alpha = 0.2f) else TealContainer), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = if (isConfigured) EmeraldTertiary else TealPrimary, modifier = Modifier.size(18.dp))
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Tier 2 & 3: Gemini 2.5 Flash Cloud AI", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
+                                Text("Deep handwriting deciphering, lab biomarker analysis & AI summaries.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(if (isConfigured) "Enabled" else "Optional", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = if (isConfigured) EmeraldTertiary else TealPrimary)
+                        }
+                    }
+                }
+
+                // Current Status Banner
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isConfigured) EmeraldTertiary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isConfigured) EmeraldTertiary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isConfigured) Icons.Default.Check else Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = if (isConfigured) EmeraldTertiary else TealPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text(
+                                text = if (isConfigured) "Gemini 2.5 Flash Active" else "Ready: Local ML Kit OCR Default",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = if (isConfigured) EmeraldTertiary else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (isConfigured) "Key: ${ApiKeyManager.getMaskedKey(context)}" else "Instant on-device scanning works out-of-the-box. Add key below for Gemini AI.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Input Field
+                OutlinedTextField(
+                    value = apiKeyText,
+                    onValueChange = { apiKeyText = it },
+                    label = { Text("Google Gemini API Key") },
+                    placeholder = { Text("AIzaSy...") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("gemini_api_key_input"),
+                    shape = RoundedCornerShape(12.dp),
+                    visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                            Icon(
+                                imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = if (isPasswordVisible) "Hide key" else "Show key"
+                            )
+                        }
+                    }
+                )
+
+                // Actions: Save & Clear
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (isCustom) {
+                        OutlinedButton(
+                            onClick = {
+                                ApiKeyManager.clearApiKey(context)
+                                apiKeyText = ApiKeyManager.getApiKey(context)
+                                isCustom = ApiKeyManager.hasCustomKey(context)
+                                isConfigured = ApiKeyManager.isConfigured(context)
+                                Toast.makeText(context, "Custom API key cleared", Toast.LENGTH_SHORT).show()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Reset")
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            val trimmed = apiKeyText.trim()
+                            if (trimmed.isNotBlank()) {
+                                ApiKeyManager.setApiKey(context, trimmed)
+                                isCustom = ApiKeyManager.hasCustomKey(context)
+                                isConfigured = ApiKeyManager.isConfigured(context)
+                                Toast.makeText(context, "Gemini API key saved successfully!", Toast.LENGTH_SHORT).show()
+                                onDismiss()
+                            } else {
+                                Toast.makeText(context, "Please enter a valid API key", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("save_api_key_btn")
+                    ) {
+                        Text("Save Key")
+                    }
+                }
+
+                // Get Free Key Guide Link
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/app/apikey"))
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Open https://aistudio.google.com/app/apikey in your browser", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "How to get a free API Key?",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = TealPrimary
+                            )
+                            Text(
+                                text = "Visit Google AI Studio to generate a 100% free Gemini API key in 1 click.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.OpenInNew,
+                            contentDescription = "Open Google AI Studio",
+                            tint = TealPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }

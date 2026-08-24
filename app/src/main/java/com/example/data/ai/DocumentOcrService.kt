@@ -27,6 +27,55 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+object ApiKeyManager {
+    private const val PREFS_NAME = "medivault_ai_settings"
+    private const val KEY_CUSTOM_GEMINI_API = "custom_gemini_api_key"
+
+    fun getApiKey(context: Context): String {
+        val customKey = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_CUSTOM_GEMINI_API, "")?.trim() ?: ""
+        if (customKey.isNotBlank()) {
+            return customKey
+        }
+        val buildKey = BuildConfig.GEMINI_API_KEY.trim()
+        if (buildKey.isNotBlank() && buildKey != "MY_GEMINI_API_KEY") {
+            return buildKey
+        }
+        return ""
+    }
+
+    fun setApiKey(context: Context, key: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CUSTOM_GEMINI_API, key.trim())
+            .apply()
+    }
+
+    fun clearApiKey(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_CUSTOM_GEMINI_API)
+            .apply()
+    }
+
+    fun hasCustomKey(context: Context): Boolean {
+        val customKey = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_CUSTOM_GEMINI_API, "")?.trim() ?: ""
+        return customKey.isNotBlank()
+    }
+
+    fun isConfigured(context: Context): Boolean {
+        return getApiKey(context).isNotBlank()
+    }
+
+    fun getMaskedKey(context: Context): String {
+        val key = getApiKey(context)
+        if (key.isBlank()) return "Not configured"
+        if (key.length <= 8) return "••••••••"
+        return "${key.take(6)}••••••••${key.takeLast(4)}"
+    }
+}
+
 class DocumentOcrService(private val context: Context) {
 
     companion object {
@@ -50,10 +99,10 @@ class DocumentOcrService(private val context: Context) {
         mimeType: String,
         prompt: String
     ): Result<String> = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
+        val apiKey = ApiKeyManager.getApiKey(context)
+        if (apiKey.isBlank()) {
             return@withContext Result.failure(
-                IllegalStateException("Gemini API key is not configured. Please set GEMINI_API_KEY in the Secrets panel.")
+                IllegalStateException("Gemini API key is not configured. Please tap 'Configure API Key' or set it in the Settings/About dialog.")
             )
         }
 
@@ -127,126 +176,158 @@ class DocumentOcrService(private val context: Context) {
         }
     }
 
+    private val onDeviceScanner = OnDeviceOcrScanner(context)
+
     /**
      * Extracts structured details from a medical bill/invoice image.
+     * Uses Gemini 2.5 Flash if configured; falls back automatically to On-Device ML Kit OCR.
      */
     suspend fun extractBillDetails(imageUri: Uri): Result<InferredBillData> = withContext(Dispatchers.IO) {
+        val isCloudAiAvailable = ApiKeyManager.isConfigured(context)
         val base64Data = AttachmentUtils.uriToBase64(context, imageUri)
-            ?: return@withContext Result.failure(IllegalArgumentException("Could not read image from URI"))
 
-        val prompt = """
-            You are a specialized Medical Document and Financial OCR system.
-            Carefully inspect this attached medical bill, hospital receipt, pharmacy invoice, or insurance statement image.
-            
-            Extract all relevant financial and clinical information into a single clean JSON object with the following schema:
-            ```json
-            {
-              "providerName": "Hospital, Clinic, Diagnostic Center, or Pharmacy name",
-              "doctorName": "Doctor or physician name if present (or empty string)",
-              "category": "CONSULTATION or DIAGNOSTIC_LAB or PHARMACY or SURGERY_PROCEDURE or HOSPITAL_STAY or EMERGENCY or DENTAL or THERAPY or OTHER",
-              "invoiceNumber": "Invoice, receipt, or bill reference number if visible",
-              "totalAmount": 1500.0,
-              "insuranceCoveredAmount": 0.0,
-              "paymentStatus": "PAID or PENDING or CLAIM_SUBMITTED",
-              "lineItemsRaw": "Item 1: ₹500\nItem 2: ₹1000",
-              "notes": "Brief notes on charges, payment mode, or claim submission details",
-              "aiSummary": "2-3 sentences explaining this bill, items charged, and overall financial summary"
+        if (isCloudAiAvailable && base64Data != null) {
+            val prompt = """
+                You are a specialized Medical Document and Financial OCR system.
+                Carefully inspect this attached medical bill, hospital receipt, pharmacy invoice, or insurance statement image.
+                
+                Extract all relevant financial and clinical information into a single clean JSON object with the following schema:
+                ```json
+                {
+                  "providerName": "Hospital, Clinic, Diagnostic Center, or Pharmacy name",
+                  "doctorName": "Doctor or physician name if present (or empty string)",
+                  "category": "CONSULTATION or DIAGNOSTIC_LAB or PHARMACY or SURGERY_PROCEDURE or HOSPITAL_STAY or EMERGENCY or DENTAL or THERAPY or OTHER",
+                  "invoiceNumber": "Invoice, receipt, or bill reference number if visible",
+                  "totalAmount": 1500.0,
+                  "insuranceCoveredAmount": 0.0,
+                  "paymentStatus": "PAID or PENDING or CLAIM_SUBMITTED",
+                  "lineItemsRaw": "Item 1: ₹500\nItem 2: ₹1000",
+                  "notes": "Brief notes on charges, payment mode, or claim submission details",
+                  "aiSummary": "2-3 sentences explaining this bill, items charged, and overall financial summary"
+                }
+                ```
+                Return ONLY the valid JSON object inside markdown json code block.
+            """.trimIndent()
+
+            val rawResult = callGeminiMultimodal(base64Data.first, base64Data.second, prompt)
+            if (rawResult.isSuccess) {
+                return@withContext rawResult.mapCatching { parseBillJson(it) }
             }
-            ```
-            Return ONLY the valid JSON object inside markdown json code block.
-        """.trimIndent()
+            Log.w(TAG, "Gemini bill extraction failed, falling back to ML Kit OCR: ${rawResult.exceptionOrNull()?.message}")
+        }
 
-        val rawResult = callGeminiMultimodal(base64Data.first, base64Data.second, prompt)
-        rawResult.mapCatching { rawText ->
-            parseBillJson(rawText)
+        // Tier 1 Fallback: ML Kit On-Device Scanner
+        val textResult = onDeviceScanner.recognizeTextFromUri(imageUri)
+        textResult.mapCatching { recognizedText ->
+            onDeviceScanner.parseBillFromText(recognizedText)
         }
     }
 
     /**
      * Extracts structured findings, biomarkers, and health status from a diagnostic report image.
+     * Uses Gemini 2.5 Flash if configured; falls back automatically to On-Device ML Kit OCR.
      */
     suspend fun extractReportDetails(imageUri: Uri): Result<InferredReportData> = withContext(Dispatchers.IO) {
+        val isCloudAiAvailable = ApiKeyManager.isConfigured(context)
         val base64Data = AttachmentUtils.uriToBase64(context, imageUri)
-            ?: return@withContext Result.failure(IllegalArgumentException("Could not read image from URI"))
 
-        val prompt = """
-            You are a specialized Clinical Pathology, Radiology, and Medical Diagnostic Report Interpreter.
-            Carefully examine this medical test report, scan results, or laboratory document image.
-            
-            Extract the test name, clinical summary, department, health status, and all specific biomarker / test parameter readings into a JSON object:
-            ```json
-            {
-              "testName": "Name of diagnostic test (e.g. Complete Blood Count, Lipid Profile, Thyroid Panel, MRI Brain)",
-              "category": "PATHOLOGY_BLOOD or RADIOLOGY_IMAGING or CARDIOLOGY or URINE_STOOL or BIOPSY or ANNUAL_CHECKUP or SPECIALTY_LAB or OTHER",
-              "labOrFacility": "Name of laboratory or diagnostic facility",
-              "orderingDoctor": "Physician or doctor who ordered the test (or empty string)",
-              "summaryFindings": "Clear, informative clinical summary of findings and diagnostic interpretation",
-              "status": "NORMAL or ATTENTION_REQUIRED or CRITICAL",
-              "doctorAdvice": "Recommended follow-up, dietary advice, or repeats mentioned in report",
-              "biomarkers": [
+        if (isCloudAiAvailable && base64Data != null) {
+            val prompt = """
+                You are a specialized Clinical Pathology, Radiology, and Medical Diagnostic Report Interpreter.
+                Carefully examine this medical test report, scan results, or laboratory document image.
+                
+                Extract the test name, clinical summary, department, health status, and all specific biomarker / test parameter readings into a JSON object:
+                ```json
                 {
-                  "name": "Hemoglobin",
-                  "value": "14.2",
-                  "unit": "g/dL",
-                  "referenceRange": "13.5 - 17.5",
-                  "flag": "Normal"
+                  "testName": "Name of diagnostic test (e.g. Complete Blood Count, Lipid Profile, Thyroid Panel, MRI Brain)",
+                  "category": "PATHOLOGY_BLOOD or RADIOLOGY_IMAGING or CARDIOLOGY or URINE_STOOL or BIOPSY or ANNUAL_CHECKUP or SPECIALTY_LAB or OTHER",
+                  "labOrFacility": "Name of laboratory or diagnostic facility",
+                  "orderingDoctor": "Physician or doctor who ordered the test (or empty string)",
+                  "summaryFindings": "Clear, informative clinical summary of findings and diagnostic interpretation",
+                  "status": "NORMAL or ATTENTION_REQUIRED or CRITICAL",
+                  "doctorAdvice": "Recommended follow-up, dietary advice, or repeats mentioned in report",
+                  "biomarkers": [
+                    {
+                      "name": "Hemoglobin",
+                      "value": "14.2",
+                      "unit": "g/dL",
+                      "referenceRange": "13.5 - 17.5",
+                      "flag": "Normal"
+                    }
+                  ],
+                  "aiSummary": "Comprehensive plain-language health explanation of what these results mean for the patient"
                 }
-              ],
-              "aiSummary": "Comprehensive plain-language health explanation of what these results mean for the patient"
-            }
-            ```
-            Return ONLY the valid JSON object inside markdown json code block.
-        """.trimIndent()
+                ```
+                Return ONLY the valid JSON object inside markdown json code block.
+            """.trimIndent()
 
-        val rawResult = callGeminiMultimodal(base64Data.first, base64Data.second, prompt)
-        rawResult.mapCatching { rawText ->
-            parseReportJson(rawText)
+            val rawResult = callGeminiMultimodal(base64Data.first, base64Data.second, prompt)
+            if (rawResult.isSuccess) {
+                return@withContext rawResult.mapCatching { parseReportJson(it) }
+            }
+            Log.w(TAG, "Gemini report extraction failed, falling back to ML Kit OCR: ${rawResult.exceptionOrNull()?.message}")
+        }
+
+        // Tier 1 Fallback: ML Kit On-Device Scanner
+        val textResult = onDeviceScanner.recognizeTextFromUri(imageUri)
+        textResult.mapCatching { recognizedText ->
+            onDeviceScanner.parseReportFromText(recognizedText)
         }
     }
 
     /**
      * Extracts doctor, diagnosis, medicines, dosages, and daily slots from a prescription image.
+     * Uses Gemini 2.5 Flash for deep handwriting deciphering; falls back automatically to On-Device ML Kit OCR.
      */
     suspend fun extractPrescriptionDetails(imageUri: Uri): Result<InferredPrescriptionData> = withContext(Dispatchers.IO) {
+        val isCloudAiAvailable = ApiKeyManager.isConfigured(context)
         val base64Data = AttachmentUtils.uriToBase64(context, imageUri)
-            ?: return@withContext Result.failure(IllegalArgumentException("Could not read image from URI"))
 
-        val prompt = """
-            You are an expert Doctor's Prescription Reader and Pharmacological Assistant.
-            Carefully decipher the handwriting/text in this medical prescription image.
-            
-            Extract the doctor's name, clinic, diagnosis/health condition, duration, advice, and all prescribed medications with exact dosage, schedule, timing, and pill counts:
-            ```json
-            {
-              "doctorName": "Doctor's full name",
-              "specialty": "Doctor specialty e.g. Cardiologist, Physician, Pediatrician",
-              "clinicOrHospital": "Hospital or clinic name",
-              "diagnosis": "Diagnosed condition or symptom (e.g. Hypertension, Acute Bronchitis, Type 2 Diabetes)",
-              "doctorAdvice": "Lifestyle, dietary, or follow-up instructions",
-              "durationDays": 30,
-              "medications": [
+        if (isCloudAiAvailable && base64Data != null) {
+            val prompt = """
+                You are an expert Doctor's Prescription Reader and Pharmacological Assistant.
+                Carefully decipher the handwriting/text in this medical prescription image.
+                
+                Extract the doctor's name, clinic, diagnosis/health condition, duration, advice, and all prescribed medications with exact dosage, schedule, timing, and pill counts:
+                ```json
                 {
-                  "name": "Amoxicillin",
-                  "dosage": "500 mg",
-                  "form": "TABLET or CAPSULE or SYRUP or INJECTION or INHALER or DROPS or CREAM or OTHER",
-                  "frequency": "ONCE_DAILY or TWICE_DAILY or THRICE_DAILY or FOUR_TIMES_DAILY or AS_NEEDED or WEEKLY",
-                  "timing": "After Meals or Before Meals or With Meals or At Bedtime",
-                  "pillsCount": 30,
-                  "slotMorning": true,
-                  "slotAfternoon": false,
-                  "slotEvening": true,
-                  "slotNight": false
+                  "doctorName": "Doctor's full name",
+                  "specialty": "Doctor specialty e.g. Cardiologist, Physician, Pediatrician",
+                  "clinicOrHospital": "Hospital or clinic name",
+                  "diagnosis": "Diagnosed condition or symptom (e.g. Hypertension, Acute Bronchitis, Type 2 Diabetes)",
+                  "doctorAdvice": "Lifestyle, dietary, or follow-up instructions",
+                  "durationDays": 30,
+                  "medications": [
+                    {
+                      "name": "Amoxicillin",
+                      "dosage": "500 mg",
+                      "form": "TABLET or CAPSULE or SYRUP or INJECTION or INHALER or DROPS or CREAM or OTHER",
+                      "frequency": "ONCE_DAILY or TWICE_DAILY or THRICE_DAILY or FOUR_TIMES_DAILY or AS_NEEDED or WEEKLY",
+                      "timing": "After Meals or Before Meals or With Meals or At Bedtime",
+                      "pillsCount": 30,
+                      "slotMorning": true,
+                      "slotAfternoon": false,
+                      "slotEvening": true,
+                      "slotNight": false
+                    }
+                  ],
+                  "aiSummary": "Concise summary of this treatment plan, medications prescribed, and key patient instructions"
                 }
-              ],
-              "aiSummary": "Concise summary of this treatment plan, medications prescribed, and key patient instructions"
-            }
-            ```
-            Return ONLY the valid JSON object inside markdown json code block.
-        """.trimIndent()
+                ```
+                Return ONLY the valid JSON object inside markdown json code block.
+            """.trimIndent()
 
-        val rawResult = callGeminiMultimodal(base64Data.first, base64Data.second, prompt)
-        rawResult.mapCatching { rawText ->
-            parsePrescriptionJson(rawText)
+            val rawResult = callGeminiMultimodal(base64Data.first, base64Data.second, prompt)
+            if (rawResult.isSuccess) {
+                return@withContext rawResult.mapCatching { parsePrescriptionJson(it) }
+            }
+            Log.w(TAG, "Gemini rx extraction failed, falling back to ML Kit OCR: ${rawResult.exceptionOrNull()?.message}")
+        }
+
+        // Tier 1 Fallback: ML Kit On-Device Scanner
+        val textResult = onDeviceScanner.recognizeTextFromUri(imageUri)
+        textResult.mapCatching { recognizedText ->
+            onDeviceScanner.parsePrescriptionFromText(recognizedText)
         }
     }
 

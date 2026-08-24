@@ -37,8 +37,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -85,6 +87,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.data.ai.ApiKeyManager
 import com.example.data.ai.DocumentOcrService
 import com.example.data.model.BillCategory
 import com.example.data.model.FamilyMember
@@ -125,6 +128,8 @@ fun DocumentAttachmentPickerSection(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var showApiKeyDialog by remember { mutableStateOf(false) }
+    val isKeyConfigured = remember(showApiKeyDialog) { ApiKeyManager.isConfigured(context) }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -272,12 +277,23 @@ fun DocumentAttachmentPickerSection(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Text(
-                                    text = "Gemini AI Auto-Fill",
+                                    text = if (isKeyConfigured) "Gemini 2.5 AI Scanner" else "Smart OCR Scanner",
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = TealPrimary
                                     )
                                 )
+                                IconButton(
+                                    onClick = { showApiKeyDialog = true },
+                                    modifier = Modifier.size(22.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isKeyConfigured) Icons.Outlined.Key else Icons.Default.Key,
+                                        contentDescription = "Configure Gemini AI API Key",
+                                        tint = TealPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
 
                             if (isInferring) {
@@ -290,18 +306,23 @@ fun DocumentAttachmentPickerSection(
                                 Button(
                                     onClick = onTriggerInfer,
                                     shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = TealPrimary
+                                    ),
                                     contentPadding = ButtonDefaults.TextButtonContentPadding,
                                     modifier = Modifier.testTag("btn_auto_infer_gemini")
                                 ) {
-                                    Text("Auto-Extract Details", fontSize = 12.sp)
+                                    Text(
+                                        text = "Auto-Extract Details",
+                                        fontSize = 12.sp
+                                    )
                                 }
                             }
                         }
 
                         if (isInferring) {
                             Text(
-                                text = "Analyzing image with Gemini 2.5 Flash... Reading text, amounts & clinical parameters.",
+                                text = if (isKeyConfigured) "Analyzing with Gemini 2.5 Flash..." else "Scanning on-device with ML Kit OCR...",
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                                 color = TealPrimary
                             )
@@ -310,6 +331,12 @@ fun DocumentAttachmentPickerSection(
                                 text = "✨ $aiExtractedNotes",
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                 color = MaterialTheme.colorScheme.onSurface
+                            )
+                        } else if (!isKeyConfigured) {
+                            Text(
+                                text = "⚡ Ready to scan on-device via ML Kit (Tap key icon to switch to Gemini 2.5 Flash).",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
                             Text(
@@ -322,6 +349,12 @@ fun DocumentAttachmentPickerSection(
                 }
             }
         }
+    }
+
+    if (showApiKeyDialog) {
+        ApiKeySettingsDialog(
+            onDismiss = { showApiKeyDialog = false }
+        )
     }
 }
 
