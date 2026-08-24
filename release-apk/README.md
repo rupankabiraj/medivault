@@ -2,9 +2,10 @@
 
 This directory contains pre-compiled debug APK builds of the **MediVault** Android application for direct installation and testing.
 
-## File Details
-- **File:** `medivault-debug.apk`
-- **Build Variant:** Debug (Universal Architecture)
+## Available APK Files
+- **`medivault-debug.apk`** / **`medivault-v1.1.0.apk`** (Latest Build with On-Device ML Kit OCR, Google SSO, and Gemini 2.5 Flash 3-Tier Scanning)
+- **`medivault-v1.0.0.apk`** (Initial Release)
+- **Build Variant:** Debug (Universal Architecture, with embedded ML Kit OCR engine)
 - **Minimum Android Version:** Android 8.0 (API Level 26+)
 - **Target Android Version:** Android 14 / 15 (API Level 34 / 35)
 
